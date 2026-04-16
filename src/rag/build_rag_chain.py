@@ -1,6 +1,7 @@
 # ============================================================
 # - BM25 / Dense / RRF 기반 검색
 # - response example 연결
+# - example vector DB 기반 응답 예시 검색 추가
 # - LLM으로 추천 답변 생성
 # - 상황 요약 / 감정 / 위험도 / 추천 답변 / 피해야 할 표현 출력 강화
 # ============================================================
@@ -27,6 +28,7 @@ PROCESSED_DATA_DIR = BASE_DIR / "data" / "processed"
 RAG_TEXT_PATH = PROCESSED_DATA_DIR / "rag_documents_with_text.csv"
 RESPONSE_TEXT_PATH = PROCESSED_DATA_DIR / "response_pairs_with_text.csv"
 VECTOR_DB_DIR = PROCESSED_DATA_DIR / "faiss_rag_db"
+EXAMPLE_VECTOR_DB_DIR = PROCESSED_DATA_DIR / "faiss_example_db"
 
 
 # ============================================================
@@ -117,6 +119,23 @@ def load_vector_db(openai_api_key: str) -> FAISS:
     return vector_db
 
 
+def load_example_vector_db(openai_api_key: str) -> FAISS:
+    embeddings = OpenAIEmbeddings(
+        model="text-embedding-3-small",
+        api_key=openai_api_key,
+    )
+
+    if not EXAMPLE_VECTOR_DB_DIR.exists():
+        raise FileNotFoundError(f"예시 벡터DB 폴더가 없습니다: {EXAMPLE_VECTOR_DB_DIR}")
+
+    example_vector_db = FAISS.load_local(
+        str(EXAMPLE_VECTOR_DB_DIR),
+        embeddings,
+        allow_dangerous_deserialization=True
+    )
+    return example_vector_db
+
+
 def load_llm(openai_api_key: str) -> ChatOpenAI:
     return ChatOpenAI(
         model="gpt-4.1-mini",
@@ -164,6 +183,24 @@ def dense_search(query: str, vector_db: FAISS, k: int = 3) -> list[dict]:
             "speaker_emotion": clean_text(doc.metadata.get("speaker_emotion", "")),
             "risk_level": clean_text(doc.metadata.get("risk_level", "")),
             "page_content": clean_text(doc.page_content),
+        })
+    return results
+
+
+def example_dense_search(question: str, example_vector_db: FAISS, k: int = 5) -> list[dict]:
+    docs = example_vector_db.similarity_search(question, k=k)
+
+    results = []
+    for doc in docs:
+        results.append({
+            "dialogue_id": clean_text(doc.metadata.get("dialogue_id", "")),
+            "relation": clean_text(doc.metadata.get("relation", "")),
+            "situation": clean_text(doc.metadata.get("situation", "")),
+            "speaker_emotion": clean_text(doc.metadata.get("speaker_emotion", "")),
+            "listener_empathy": clean_text(doc.metadata.get("listener_empathy", "")),
+            "terminate": clean_text(doc.metadata.get("terminate", "")),
+            "listener_response": clean_text(doc.metadata.get("listener_response", "")),
+            "response_example_text": clean_text(doc.page_content),
         })
     return results
 
@@ -300,20 +337,32 @@ def score_response_example(row: pd.Series, emotion: str, question_keywords: list
     context_before_response = clean_text(row.get("context_before_response", ""))
     listener_response = clean_text(row.get("listener_response", ""))
     listener_empathy = clean_text(row.get("listener_empathy", ""))
+    response_example_text = clean_text(row.get("response_example_text", ""))
 
     merged_text = " ".join([
-        relation, situation, speaker_emotion,
-        context_before_response, listener_response, listener_empathy
+        relation,
+        situation,
+        speaker_emotion,
+        context_before_response,
+        listener_response,
+        listener_empathy,
+        response_example_text,
     ])
 
     if relation == "연인":
         score += 2
+
     if emotion and emotion in speaker_emotion:
         score += 3
+
     for kw in question_keywords:
         if kw in merged_text:
             score += 2
+
     if listener_empathy and listener_empathy != "미분류":
+        score += 1
+
+    if listener_response:
         score += 1
 
     return score
@@ -324,6 +373,7 @@ def get_response_examples(
     retrieved_docs: list[dict],
     emotion: str,
     question: str,
+    example_vector_db: FAISS,
     top_n: int = 3
 ) -> str:
     dialogue_ids = [
@@ -332,8 +382,42 @@ def get_response_examples(
         if clean_text(doc.get("dialogue_id", ""))
     ]
 
+    # 1차: 현재 검색된 문서와 직접 연결된 응답 예시
     candidate_df = filter_response_examples_by_dialogue_ids(response_df, dialogue_ids)
 
+    # 2차: example vector DB에서 유사 응답 예시 검색
+    vector_candidates = example_dense_search(question, example_vector_db, k=5)
+    vector_candidate_df = pd.DataFrame(vector_candidates)
+
+    # 두 후보 합치기
+    if not vector_candidate_df.empty:
+        if candidate_df.empty:
+            candidate_df = vector_candidate_df.copy()
+        else:
+            merge_cols = [
+                "dialogue_id",
+                "relation",
+                "situation",
+                "speaker_emotion",
+                "listener_empathy",
+                "terminate",
+                "listener_response",
+                "response_example_text",
+            ]
+
+            for col in merge_cols:
+                if col not in candidate_df.columns:
+                    candidate_df[col] = ""
+
+            candidate_df = pd.concat(
+                [candidate_df[merge_cols], vector_candidate_df[merge_cols]],
+                ignore_index=True
+            )
+
+            dedup_cols = ["dialogue_id", "listener_response"]
+            candidate_df = candidate_df.drop_duplicates(subset=dedup_cols)
+
+    # 그래도 비면 전체 fallback
     if candidate_df.empty:
         candidate_df = response_df.copy()
 
@@ -384,13 +468,18 @@ PROMPT = PromptTemplate.from_template(
 이해하기 쉽게 정리해야 한다.
 
 반드시 아래 조건을 지켜야 한다.
+- 첫 문장에서 사용자의 감정을 분명하게 공감할 것
 - 너무 길지 않게 작성할 것
+- 답변은 2~4문장 정도로 작성할 것
 - 공격적이거나 비난하는 말투는 피할 것
 - 감정은 솔직하지만 부드럽게 전달할 것
 - 실제 채팅에 바로 복붙해서 보낼 수 있는 문장으로 작성할 것
 - 지나치게 상담사처럼 말하지 말 것
 - 사용자의 현재 감정 톤을 반영할 것
-- 유사 사례의 맥락을 참고하되, 현재 질문에 더 직접 맞게 작성할 것
+- 유사 사례와 응답 예시는 참고만 하고, 그대로 복사하지 말 것
+- 판단하거나 평가하지 말 것
+- 해결책을 강요하지 말 것
+- 필요하면 마지막에 짧은 질문 1개를 덧붙일 수 있음
 
 사용자 입력:
 {question}
@@ -444,6 +533,7 @@ def generate_recommended_reply(question: str, method: str = "rrf", k: int = 3) -
     rag_df, response_df = load_dataframes()
     bm25 = build_bm25(rag_df)
     vector_db = load_vector_db(openai_api_key)
+    example_vector_db = load_example_vector_db(openai_api_key)
     llm = load_llm(openai_api_key)
 
     retrieved_docs = retrieve_documents(
@@ -465,6 +555,7 @@ def generate_recommended_reply(question: str, method: str = "rrf", k: int = 3) -
         retrieved_docs=retrieved_docs,
         emotion=main_emotion,
         question=question,
+        example_vector_db=example_vector_db,
         top_n=3,
     )
 
@@ -501,6 +592,9 @@ def main() -> None:
     print("\n===== 입력 질문 =====")
     print(output["question"])
 
+    print("\n===== 검색된 유사 사례 수 =====")
+    print(len(output["retrieved_docs"]))
+
     print("\n===== 상황 요약 =====")
     print(output["situation_summary"])
 
@@ -509,6 +603,9 @@ def main() -> None:
 
     print("\n===== 갈등 위험도 =====")
     print(output["risk_level"])
+
+    print("\n===== 응답 예시 =====")
+    print(output["response_examples"])
 
     print("\n===== 최종 생성 결과 =====")
     print(output["result_text"])
