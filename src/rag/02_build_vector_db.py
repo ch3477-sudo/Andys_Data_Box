@@ -19,8 +19,8 @@ from langchain_community.vectorstores import FAISS
 # ============================================================
 # 1. 경로 설정
 # ============================================================
-BASE_DIR = Path(__file__).resolve().parents[2]
-PROCESSED_DATA_DIR = BASE_DIR / "data" / "processed"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROCESSED_DATA_DIR = PROJECT_ROOT / "data" / "processed"
 
 RAG_TEXT_PATH = PROCESSED_DATA_DIR / "rag_documents_with_text.csv"
 RESPONSE_TEXT_PATH = PROCESSED_DATA_DIR / "response_pairs_with_text.csv"
@@ -32,13 +32,63 @@ MAX_TEXT_LENGTH = 4000
 
 
 # ============================================================
-# 2. 환경변수 로드
+# 2. API KEY 로드
+#    우선순위: .streamlit/secrets.toml -> .env
 # ============================================================
-load_dotenv()
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+def _is_placeholder(value: str) -> bool:
+    normalized = value.strip().strip('"').strip("'")
+    if not normalized:
+        return True
+    return (
+        normalized.startswith("<")
+        or normalized.startswith("your_")
+        or normalized.upper() in {"TODO", "TBD", "REPLACE_ME", "CHANGEME"}
+    )
 
-if not OPENAI_API_KEY:
-    raise ValueError("OPENAI_API_KEY가 설정되지 않음.")
+
+def _load_from_secrets_toml(key: str) -> str | None:
+    secrets_path = PROJECT_ROOT / ".streamlit" / "secrets.toml"
+    if not secrets_path.exists():
+        return None
+
+    try:
+        try:
+            import tomllib
+        except ImportError:
+            import tomli as tomllib  # type: ignore[no-redef]
+
+        with secrets_path.open("rb") as f:
+            secret_data = tomllib.load(f)
+    except Exception:
+        return None
+
+    secret_value = secret_data.get(key)
+    if secret_value and not _is_placeholder(str(secret_value)):
+        return str(secret_value)
+    return None
+
+
+def _load_from_env_files(key: str) -> str | None:
+    for env_path in (PROJECT_ROOT / "data" / ".env", PROJECT_ROOT / ".env"):
+        if env_path.exists():
+            load_dotenv(dotenv_path=env_path, override=False)
+
+    env_value = os.getenv(key)
+    if env_value and not _is_placeholder(env_value):
+        return env_value
+    return None
+
+
+def load_api_key(key: str = "OPENAI_API_KEY") -> str:
+    openai_api_key = _load_from_secrets_toml(key) or _load_from_env_files(key)
+    if not openai_api_key:
+        raise ValueError(
+            f"{key}가 설정되지 않음. .streamlit/secrets.toml 또는 .env를 확인하세요."
+        )
+    return openai_api_key
+
+
+OPENAI_API_KEY = load_api_key("OPENAI_API_KEY")
 
 
 # ============================================================

@@ -7,39 +7,31 @@
 # ============================================================
 
 from pathlib import Path
-import os
 from collections import Counter, defaultdict
 
 import pandas as pd
-from dotenv import load_dotenv
 from rank_bm25 import BM25Okapi
 
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_community.vectorstores import FAISS
 from langchain_core.prompts import PromptTemplate
 
+try:
+    from .api_key_loader import load_api_key
+except ImportError:
+    from api_key_loader import load_api_key
+
 
 # ============================================================
 # 1. 경로 설정
 # ============================================================
-BASE_DIR = Path(__file__).resolve().parents[2]
-PROCESSED_DATA_DIR = BASE_DIR / "data" / "processed"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROCESSED_DATA_DIR = PROJECT_ROOT / "data" / "processed"
 
 RAG_TEXT_PATH = PROCESSED_DATA_DIR / "rag_documents_with_text.csv"
 RESPONSE_TEXT_PATH = PROCESSED_DATA_DIR / "response_pairs_with_text.csv"
 VECTOR_DB_DIR = PROCESSED_DATA_DIR / "faiss_rag_db"
 EXAMPLE_VECTOR_DB_DIR = PROCESSED_DATA_DIR / "faiss_example_db"
-
-
-# ============================================================
-# 2. 환경 변수 로드
-# ============================================================
-def load_api_key() -> str:
-    load_dotenv()
-    openai_api_key = os.getenv("OPENAI_API_KEY")
-    if not openai_api_key:
-        raise ValueError("OPENAI_API_KEY가 설정되지 않았습니다.")
-    return openai_api_key
 
 
 # ============================================================
@@ -97,13 +89,13 @@ def load_dataframes() -> tuple[pd.DataFrame, pd.DataFrame]:
 
 
 def build_bm25(rag_df: pd.DataFrame) -> BM25Okapi:
-    docs = rag_df["rag_text"].tolist()
-    tokenized_docs = [doc.split() for doc in docs]
-    return BM25Okapi(tokenized_docs)
+    rag_texts = rag_df["rag_text"].tolist()
+    tokenized_rag_texts = [rag_text.split() for rag_text in rag_texts]
+    return BM25Okapi(tokenized_rag_texts)
 
 
 def load_vector_db(openai_api_key: str) -> FAISS:
-    embeddings = OpenAIEmbeddings(
+    embedding_model = OpenAIEmbeddings(
         model="text-embedding-3-small",
         api_key=openai_api_key,
     )
@@ -113,14 +105,14 @@ def load_vector_db(openai_api_key: str) -> FAISS:
 
     vector_db = FAISS.load_local(
         str(VECTOR_DB_DIR),
-        embeddings,
+        embedding_model,
         allow_dangerous_deserialization=True
     )
     return vector_db
 
 
 def load_example_vector_db(openai_api_key: str) -> FAISS:
-    embeddings = OpenAIEmbeddings(
+    embedding_model = OpenAIEmbeddings(
         model="text-embedding-3-small",
         api_key=openai_api_key,
     )
@@ -130,7 +122,7 @@ def load_example_vector_db(openai_api_key: str) -> FAISS:
 
     example_vector_db = FAISS.load_local(
         str(EXAMPLE_VECTOR_DB_DIR),
-        embeddings,
+        embedding_model,
         allow_dangerous_deserialization=True
     )
     return example_vector_db
@@ -172,35 +164,35 @@ def bm25_search(query: str, rag_df: pd.DataFrame, bm25: BM25Okapi, k: int = 3) -
 
 
 def dense_search(query: str, vector_db: FAISS, k: int = 3) -> list[dict]:
-    docs = vector_db.similarity_search(query, k=k)
+    retrieved_docs = vector_db.similarity_search(query, k=k)
 
     results = []
-    for doc in docs:
+    for retrieved_doc in retrieved_docs:
         results.append({
-            "dialogue_id": clean_text(doc.metadata.get("dialogue_id", "")),
-            "relation": clean_text(doc.metadata.get("relation", "")),
-            "situation": clean_text(doc.metadata.get("situation", "")),
-            "speaker_emotion": clean_text(doc.metadata.get("speaker_emotion", "")),
-            "risk_level": clean_text(doc.metadata.get("risk_level", "")),
-            "page_content": clean_text(doc.page_content),
+            "dialogue_id": clean_text(retrieved_doc.metadata.get("dialogue_id", "")),
+            "relation": clean_text(retrieved_doc.metadata.get("relation", "")),
+            "situation": clean_text(retrieved_doc.metadata.get("situation", "")),
+            "speaker_emotion": clean_text(retrieved_doc.metadata.get("speaker_emotion", "")),
+            "risk_level": clean_text(retrieved_doc.metadata.get("risk_level", "")),
+            "page_content": clean_text(retrieved_doc.page_content),
         })
     return results
 
 
 def example_dense_search(question: str, example_vector_db: FAISS, k: int = 5) -> list[dict]:
-    docs = example_vector_db.similarity_search(question, k=k)
+    retrieved_examples = example_vector_db.similarity_search(question, k=k)
 
     results = []
-    for doc in docs:
+    for retrieved_doc in retrieved_examples:
         results.append({
-            "dialogue_id": clean_text(doc.metadata.get("dialogue_id", "")),
-            "relation": clean_text(doc.metadata.get("relation", "")),
-            "situation": clean_text(doc.metadata.get("situation", "")),
-            "speaker_emotion": clean_text(doc.metadata.get("speaker_emotion", "")),
-            "listener_empathy": clean_text(doc.metadata.get("listener_empathy", "")),
-            "terminate": clean_text(doc.metadata.get("terminate", "")),
-            "listener_response": clean_text(doc.metadata.get("listener_response", "")),
-            "response_example_text": clean_text(doc.page_content),
+            "dialogue_id": clean_text(retrieved_doc.metadata.get("dialogue_id", "")),
+            "relation": clean_text(retrieved_doc.metadata.get("relation", "")),
+            "situation": clean_text(retrieved_doc.metadata.get("situation", "")),
+            "speaker_emotion": clean_text(retrieved_doc.metadata.get("speaker_emotion", "")),
+            "listener_empathy": clean_text(retrieved_doc.metadata.get("listener_empathy", "")),
+            "terminate": clean_text(retrieved_doc.metadata.get("terminate", "")),
+            "listener_response": clean_text(retrieved_doc.metadata.get("listener_response", "")),
+            "response_example_text": clean_text(retrieved_doc.page_content),
         })
     return results
 
@@ -534,7 +526,7 @@ def generate_recommended_reply(question: str, method: str = "rrf", k: int = 3) -
     bm25 = build_bm25(rag_df)
     vector_db = load_vector_db(openai_api_key)
     example_vector_db = load_example_vector_db(openai_api_key)
-    llm = load_llm(openai_api_key)
+    chat_model = load_llm(openai_api_key)
 
     retrieved_docs = retrieve_documents(
         question=question,
@@ -568,7 +560,7 @@ def generate_recommended_reply(question: str, method: str = "rrf", k: int = 3) -
         response_examples=response_examples,
     )
 
-    result = llm.invoke(final_prompt)
+    llm_response = chat_model.invoke(final_prompt)
 
     return {
         "question": question,
@@ -578,7 +570,7 @@ def generate_recommended_reply(question: str, method: str = "rrf", k: int = 3) -
         "main_emotion": main_emotion,
         "risk_level": risk_level,
         "response_examples": response_examples,
-        "result_text": result.content,
+        "result_text": llm_response.content,
     }
 
 

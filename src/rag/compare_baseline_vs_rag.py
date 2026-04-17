@@ -5,33 +5,25 @@
 # ============================================================
 
 from pathlib import Path
-import os
 
 import pandas as pd
-from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 
-from build_rag_chain import generate_recommended_reply
+try:
+    from .api_key_loader import load_api_key
+    from .build_rag_chain import generate_recommended_reply
+except ImportError:
+    from api_key_loader import load_api_key
+    from build_rag_chain import generate_recommended_reply
 
 
 # ============================================================
 # 1. 경로 설정
 # ============================================================
-BASE_DIR = Path(__file__).resolve().parents[2]
-PROCESSED_DATA_DIR = BASE_DIR / "data" / "processed"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROCESSED_DATA_DIR = PROJECT_ROOT / "data" / "processed"
 OUTPUT_PATH = PROCESSED_DATA_DIR / "baseline_vs_rag_results.csv"
-
-
-# ============================================================
-# 2. 환경 변수 로드
-# ============================================================
-def load_api_key() -> str:
-    load_dotenv()
-    openai_api_key = os.getenv("OPENAI_API_KEY")
-    if not openai_api_key:
-        raise ValueError("OPENAI_API_KEY가 설정되지 않았습니다.")
-    return openai_api_key
 
 
 # ============================================================
@@ -82,27 +74,27 @@ def get_test_questions() -> list[str]:
 # ============================================================
 # 5. baseline / rag 생성
 # ============================================================
-def generate_baseline_reply(question: str, llm: ChatOpenAI) -> str:
-    prompt_text = BASELINE_PROMPT.format(question=question)
-    result = llm.invoke(prompt_text)
-    return result.content
+def generate_baseline_reply(question: str, chat_model: ChatOpenAI) -> str:
+    baseline_prompt = BASELINE_PROMPT.format(question=question)
+    llm_response = chat_model.invoke(baseline_prompt)
+    return llm_response.content
 
 
 def compare_baseline_vs_rag() -> pd.DataFrame:
     openai_api_key = load_api_key()
-    llm = load_llm(openai_api_key)
+    chat_model = load_llm(openai_api_key)
 
-    rows = []
+    comparison_rows = []
     test_questions = get_test_questions()
 
     for question in test_questions:
         print(f"\n===== 질문 =====\n{question}")
 
-        baseline_answer = generate_baseline_reply(question, llm)
+        baseline_answer = generate_baseline_reply(question, chat_model)
         rag_output = generate_recommended_reply(question, method="rrf", k=3)
         rag_answer = rag_output["result_text"]
 
-        rows.append({
+        comparison_rows.append({
             "question": question,
             "baseline_answer": baseline_answer,
             "rag_answer": rag_answer,
@@ -114,13 +106,13 @@ def compare_baseline_vs_rag() -> pd.DataFrame:
             "notes": "",
         })
 
-    result_df = pd.DataFrame(rows)
-    result_df.to_csv(OUTPUT_PATH, index=False, encoding="utf-8-sig")
+    comparison_df = pd.DataFrame(comparison_rows)
+    comparison_df.to_csv(OUTPUT_PATH, index=False, encoding="utf-8-sig")
 
     print(f"\n[저장 완료] {OUTPUT_PATH}")
-    print(result_df)
+    print(comparison_df)
 
-    return result_df
+    return comparison_df
 
 
 # ============================================================

@@ -9,22 +9,25 @@
 
 from pathlib import Path
 from collections import defaultdict
-import os
 
 import pandas as pd
 import matplotlib.pyplot as plt
-from dotenv import load_dotenv
 from rank_bm25 import BM25Okapi
 
 from langchain_openai import OpenAIEmbeddings
 from langchain_community.vectorstores import FAISS
 
+try:
+    from .api_key_loader import load_api_key
+except ImportError:
+    from api_key_loader import load_api_key
+
 
 # ============================================================
 # 1. 경로 설정
 # ============================================================
-BASE_DIR = Path(__file__).resolve().parents[2]
-PROCESSED_DATA_DIR = BASE_DIR / "data" / "processed"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROCESSED_DATA_DIR = PROJECT_ROOT / "data" / "processed"
 
 RAG_TEXT_PATH = PROCESSED_DATA_DIR / "rag_documents_with_text.csv"
 VECTOR_DB_DIR = PROCESSED_DATA_DIR / "faiss_rag_db"
@@ -33,17 +36,6 @@ COMPARE_OUTPUT_PATH = PROCESSED_DATA_DIR / "retrieval_compare_results.csv"
 SUMMARY_OUTPUT_PATH = PROCESSED_DATA_DIR / "retrieval_evaluation_summary.csv"
 PLOT_OUTPUT_PATH = PROCESSED_DATA_DIR / "retrieval_method_scores.png"
 FAILURE_CASES_OUTPUT_PATH = PROCESSED_DATA_DIR / "retrieval_failure_cases.csv"
-
-
-# ============================================================
-# 2. 환경 변수 로드
-# ============================================================
-def load_api_key() -> str:
-    load_dotenv()
-    openai_api_key = os.getenv("OPENAI_API_KEY")
-    if not openai_api_key:
-        raise ValueError("OPENAI_API_KEY가 설정되지 않았습니다.")
-    return openai_api_key
 
 
 # ============================================================
@@ -87,13 +79,13 @@ def load_rag_dataframe() -> pd.DataFrame:
 
 
 def build_bm25(rag_df: pd.DataFrame) -> BM25Okapi:
-    documents = rag_df["rag_text"].tolist()
-    tokenized_docs = [doc.split() for doc in documents]
-    return BM25Okapi(tokenized_docs)
+    rag_texts = rag_df["rag_text"].tolist()
+    tokenized_rag_texts = [rag_text.split() for rag_text in rag_texts]
+    return BM25Okapi(tokenized_rag_texts)
 
 
 def load_vector_db(openai_api_key: str) -> FAISS:
-    embeddings = OpenAIEmbeddings(
+    embedding_model = OpenAIEmbeddings(
         model="text-embedding-3-small",
         api_key=openai_api_key,
     )
@@ -103,7 +95,7 @@ def load_vector_db(openai_api_key: str) -> FAISS:
 
     vector_db = FAISS.load_local(
         str(VECTOR_DB_DIR),
-        embeddings,
+        embedding_model,
         allow_dangerous_deserialization=True
     )
     return vector_db
@@ -139,19 +131,19 @@ def bm25_search(query: str, rag_df: pd.DataFrame, bm25: BM25Okapi, k: int = 3) -
 
 
 def dense_search(query: str, vector_db: FAISS, k: int = 3) -> list[dict]:
-    docs_and_scores = vector_db.similarity_search_with_score(query, k=k)
+    scored_docs = vector_db.similarity_search_with_score(query, k=k)
 
     results = []
-    for rank, (doc, score) in enumerate(docs_and_scores, start=1):
+    for rank, (retrieved_doc, score) in enumerate(scored_docs, start=1):
         results.append({
             "method": "dense",
             "rank": rank,
-            "dialogue_id": clean_text(doc.metadata.get("dialogue_id", "")),
-            "situation": clean_text(doc.metadata.get("situation", "")),
-            "speaker_emotion": clean_text(doc.metadata.get("speaker_emotion", "")),
-            "risk_level": clean_text(doc.metadata.get("risk_level", "")),
+            "dialogue_id": clean_text(retrieved_doc.metadata.get("dialogue_id", "")),
+            "situation": clean_text(retrieved_doc.metadata.get("situation", "")),
+            "speaker_emotion": clean_text(retrieved_doc.metadata.get("speaker_emotion", "")),
+            "risk_level": clean_text(retrieved_doc.metadata.get("risk_level", "")),
             "score": float(score),
-            "page_content_preview": clean_text(doc.page_content)[:300],
+            "page_content_preview": clean_text(retrieved_doc.page_content)[:300],
         })
     return results
 
@@ -198,7 +190,7 @@ def build_compare_results(
     queries: list[str],
     k: int = 3
 ) -> pd.DataFrame:
-    all_rows = []
+    comparison_rows = []
 
     for query in queries:
         bm25_results = bm25_search(query, rag_df=rag_df, bm25=bm25, k=k)
@@ -212,9 +204,9 @@ def build_compare_results(
             row["usable_for_reply"] = ""
             row["failure_type"] = ""
             row["failure_reason"] = ""
-            all_rows.append(row)
+            comparison_rows.append(row)
 
-    result_df = pd.DataFrame(all_rows)
+    result_df = pd.DataFrame(comparison_rows)
     result_df = result_df[
         [
             "query", "method", "rank", "dialogue_id", "situation",

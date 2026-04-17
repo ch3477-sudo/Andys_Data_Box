@@ -108,7 +108,7 @@ class EmotionLLMConnectorTest(unittest.TestCase):
             )
 
     def test_load_secret_skips_placeholders_and_falls_back_to_env(self) -> None:
-        old = os.environ.get("GEMINI_API_KEY")
+        previous_gemini_api_key = os.environ.get("GEMINI_API_KEY")
         os.environ["GEMINI_API_KEY"] = "env-test-key"
         try:
             with tempfile.TemporaryDirectory() as tmp:
@@ -126,10 +126,10 @@ class EmotionLLMConnectorTest(unittest.TestCase):
                     "env-test-key",
                 )
         finally:
-            if old is None:
+            if previous_gemini_api_key is None:
                 os.environ.pop("GEMINI_API_KEY", None)
             else:
-                os.environ["GEMINI_API_KEY"] = old
+                os.environ["GEMINI_API_KEY"] = previous_gemini_api_key
 
     def test_create_gemini_caller_supports_fake_client_without_network(self) -> None:
         fake_client = FakeClient()
