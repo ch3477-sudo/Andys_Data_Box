@@ -30,7 +30,7 @@
       <table align="center" width="105">
         <tr>
           <td align="center" height="120">
-            <img src=figures/렉스.jpg
+            <img src=app/figures/렉스.jpg
                  width="70" height="95"
                  style="object-fit:contain;">
           </td>
@@ -49,7 +49,7 @@
       <table align="center" width="105">
         <tr>
           <td align="center" height="120">
-            <img src="figures/우디.jpg"
+            <img src="app/figures/우디.jpg"
                  width="70" height="95"
                  style="object-fit:contain;">
           </td>
@@ -68,7 +68,7 @@
       <table align="center" width="105">
         <tr>
           <td align="center" height="120">
-            <img src="figures/미스터샤크.jpg"
+            <img src="app/figures/미스터샤크.jpg"
                  width="70" height="95"
                  style="object-fit:contain;">
           </td>
@@ -88,7 +88,7 @@
       <table align="center" width="105">
         <tr>
           <td align="center" height="120">
-            <img src="figures/미스터감자.jpg"
+            <img src="app/figures/미스터감자.jpg"
                  width="70" height="95"
                  style="object-fit:contain;">
           </td>
@@ -107,7 +107,7 @@
       <table align="center" width="105">
         <tr>
           <td align="center" height="120">
-            <img src="figures/저그 황제.jpg"
+            <img src="app/figures/저그 황제.jpg"
                  width="70" height="95"
                  style="object-fit:contain;">
           </td>
