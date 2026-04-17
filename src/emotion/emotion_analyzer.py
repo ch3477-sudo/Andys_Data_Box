@@ -82,10 +82,10 @@ class EmotionResult:
 
     def to_dict(self) -> dict:
         """딕셔너리 변환."""
-        result = asdict(self)
-        result["confidence_percent"] = self.confidence_percent
-        result["confidence_str"] = self.confidence_str
-        return result
+        result_dict = asdict(self)
+        result_dict["confidence_percent"] = self.confidence_percent
+        result_dict["confidence_str"] = self.confidence_str
+        return result_dict
 
     def to_json(self, ensure_ascii: bool = False, indent: int = 2) -> str:
         """JSON 문자열 변환."""
@@ -123,13 +123,13 @@ class DialogueEmotionResult:
 
     def to_dict(self) -> dict:
         """딕셔너리 변환."""
-        result = asdict(self)
-        result["utterance_results"] = [u.to_dict() for u in self.utterance_results]
-        result["negative_ratio_percent"] = self.negative_ratio_percent
-        result["negative_ratio_str"] = self.negative_ratio_str
-        result["emotion_volatility_percent"] = self.emotion_volatility_percent
-        result["emotion_volatility_str"] = self.emotion_volatility_str
-        return result
+        result_dict = asdict(self)
+        result_dict["utterance_results"] = [u.to_dict() for u in self.utterance_results]
+        result_dict["negative_ratio_percent"] = self.negative_ratio_percent
+        result_dict["negative_ratio_str"] = self.negative_ratio_str
+        result_dict["emotion_volatility_percent"] = self.emotion_volatility_percent
+        result_dict["emotion_volatility_str"] = self.emotion_volatility_str
+        return result_dict
 
     def to_json(self, ensure_ascii: bool = False, indent: int = 2) -> str:
         """JSON 문자열 변환."""
@@ -272,8 +272,8 @@ class EmotionClassifier:
             구조화된 감정 분석 결과.
         """
         prompt = self.get_single_prompt(utterance)
-        response = llm_caller(prompt)
-        return self.parse_single_response(utterance, response)
+        llm_response = llm_caller(prompt)
+        return self.parse_single_response(utterance, llm_response)
 
     def classify_dialogue(
         self,
@@ -299,8 +299,8 @@ class EmotionClassifier:
             대화 전체 감정 분석 결과.
         """
         prompt = self.get_dialogue_prompt(utterances)
-        response = llm_caller(prompt)
-        return self.parse_dialogue_response(utterances, response, dialogue_id)
+        llm_response = llm_caller(prompt)
+        return self.parse_dialogue_response(utterances, llm_response, dialogue_id)
 
     def parse_single_response(
         self, utterance: str, llm_output: str
@@ -325,19 +325,19 @@ class EmotionClassifier:
         ValueError
             JSON 파싱 실패 시.
         """
-        parsed = self._extract_json(llm_output)
-        primary = parsed.get("primary", "중립")
-        primary_en = parsed.get("primary_en", EMOTION_LABEL_EN.get(primary, "unknown"))
-        group = parsed.get("group", EMOTION_GROUP.get(primary, "neutral"))
-        confidence = float(parsed.get("confidence", 0.5))
-        reasoning = parsed.get("reasoning", "")
+        parsed_response = self._extract_json(llm_output)
+        primary = parsed_response.get("primary", "중립")
+        primary_en = parsed_response.get("primary_en", EMOTION_LABEL_EN.get(primary, "unknown"))
+        group = parsed_response.get("group", EMOTION_GROUP.get(primary, "neutral"))
+        confidence = float(parsed_response.get("confidence", 0.5))
+        reasoning = parsed_response.get("reasoning", "")
 
         # 유효성 검증: 알 수 없는 라벨이면 중립 처리
         if primary not in EMOTION_LABELS:
             primary = "중립"
             primary_en = "neutral"
             group = "neutral"
-            reasoning = f"[경고] 알 수 없는 라벨 반환 -> 중립 처리. 원본: {parsed.get('primary')}"
+            reasoning = f"[경고] 알 수 없는 라벨 반환 -> 중립 처리. 원본: {parsed_response.get('primary')}"
 
         return EmotionResult(
             utterance=utterance,
@@ -370,51 +370,59 @@ class EmotionClassifier:
         DialogueEmotionResult
             대화 전체 감정 분석 결과.
         """
-        parsed = self._extract_json(llm_output)
-        utt_results_raw = parsed.get("utterances", [])
-        summary = parsed.get("dialogue_summary", {})
+        parsed_response = self._extract_json(llm_output)
+        raw_utterance_results = parsed_response.get("utterances", [])
+        dialogue_summary = parsed_response.get("dialogue_summary", {})
 
-        utt_results: list[EmotionResult] = []
-        for i, raw in enumerate(utt_results_raw):
-            text = utterances[i] if i < len(utterances) else raw.get("text", "")
-            primary = raw.get("primary", "중립")
+        utterance_results: list[EmotionResult] = []
+        for index, raw_utterance in enumerate(raw_utterance_results):
+            utterance_text = (
+                utterances[index]
+                if index < len(utterances)
+                else raw_utterance.get("text", "")
+            )
+            primary = raw_utterance.get("primary", "중립")
             if primary not in EMOTION_LABELS:
                 primary = "중립"
-            utt_results.append(EmotionResult(
-                utterance=text,
+            utterance_group = raw_utterance.get("group", EMOTION_GROUP.get(primary, "neutral"))
+            utterance_results.append(EmotionResult(
+                utterance=utterance_text,
                 primary=primary,
-                primary_en=raw.get("primary_en", EMOTION_LABEL_EN.get(primary, "unknown")),
-                group=raw.get("group", EMOTION_GROUP.get(primary, "neutral")),
-                confidence=float(raw.get("confidence", 0.5)),
+                primary_en=raw_utterance.get("primary_en", EMOTION_LABEL_EN.get(primary, "unknown")),
+                group=utterance_group,
+                confidence=float(raw_utterance.get("confidence", 0.5)),
                 method="llm",
-                reasoning=raw.get("reasoning", ""),
-                strategy=GROUP_STRATEGY.get(
-                    raw.get("group", EMOTION_GROUP.get(primary, "neutral")), ""
-                ),
+                reasoning=raw_utterance.get("reasoning", ""),
+                strategy=GROUP_STRATEGY.get(utterance_group, ""),
             ))
 
-        emotion_seq = [r.primary for r in utt_results]
-        groups = [r.group for r in utt_results]
-        neg_count = sum(1 for g in groups if g == "negative")
-        neg_ratio = round(neg_count / len(groups), 4) if groups else 0.0
+        emotion_sequence = [result.primary for result in utterance_results]
+        emotion_groups = [result.group for result in utterance_results]
+        negative_count = sum(1 for group in emotion_groups if group == "negative")
+        negative_ratio = (
+            round(negative_count / len(emotion_groups), 4)
+            if emotion_groups else 0.0
+        )
 
-        if len(emotion_seq) > 1:
-            transitions = sum(
-                1 for i in range(1, len(emotion_seq))
-                if emotion_seq[i] != emotion_seq[i - 1]
+        if len(emotion_sequence) > 1:
+            emotion_transitions = sum(
+                1 for index in range(1, len(emotion_sequence))
+                if emotion_sequence[index] != emotion_sequence[index - 1]
             )
-            volatility = round(transitions / (len(emotion_seq) - 1), 4)
+            emotion_volatility = round(
+                emotion_transitions / (len(emotion_sequence) - 1), 4
+            )
         else:
-            volatility = 0.0
+            emotion_volatility = 0.0
 
         return DialogueEmotionResult(
             dialogue_id=dialogue_id,
-            utterance_results=utt_results,
-            emotion_sequence=emotion_seq,
-            dominant_emotion=summary.get("dominant_emotion", "중립"),
-            dominant_group=summary.get("dominant_group", "neutral"),
-            negative_ratio=neg_ratio,
-            emotion_volatility=volatility,
+            utterance_results=utterance_results,
+            emotion_sequence=emotion_sequence,
+            dominant_emotion=dialogue_summary.get("dominant_emotion", "중립"),
+            dominant_group=dialogue_summary.get("dominant_group", "neutral"),
+            negative_ratio=negative_ratio,
+            emotion_volatility=emotion_volatility,
             method="llm",
         )
 

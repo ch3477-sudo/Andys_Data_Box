@@ -35,7 +35,7 @@ from .risk_analyzer import analyze_risk, full_analysis
 LLMCaller = Callable[[str], str]
 
 DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
-DEFAULT_SECRET_FILENAMES = (
+DEFAULT_SECRET_PATHS = (
     Path(".streamlit") / "secrets.toml",
     Path("data") / ".env",
     Path(".env"),
@@ -64,29 +64,29 @@ def _project_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def _read_toml_secret(path: Path, key: str, default: str) -> str:
+def _read_toml_secret(secrets_path: Path, key: str, default: str) -> str:
     try:
         try:
             import tomllib
         except ImportError:  # pragma: no cover - Python <3.11 fallback.
             import tomli as tomllib  # type: ignore[no-redef]
 
-        with path.open("rb") as f:
-            data = tomllib.load(f)
-        value = data.get(key, default)
-        return str(value) if value is not None else default
+        with secrets_path.open("rb") as f:
+            secret_data = tomllib.load(f)
+        secret_value = secret_data.get(key, default)
+        return str(secret_value) if secret_value is not None else default
     except Exception:
         return default
 
 
-def _read_dotenv_secret(path: Path, key: str, default: str) -> str:
+def _read_dotenv_secret(env_path: Path, key: str, default: str) -> str:
     if dotenv_values is None:
         return default
     try:
-        value = dotenv_values(path).get(key)
+        env_value = dotenv_values(env_path).get(key)
     except Exception:
         return default
-    return str(value) if value else default
+    return str(env_value) if env_value else default
 
 
 def _is_placeholder(value: str) -> bool:
@@ -119,34 +119,34 @@ def load_secret(
     Placeholder values such as ``<your_api_key>`` are treated as missing.
     """
 
-    root = project_root or _project_root()
+    project_root_path = project_root or _project_root()
 
     if include_streamlit_runtime:
         try:
             import streamlit as st  # type: ignore
 
-            value = st.secrets.get(key, default)
-            if value and not _is_placeholder(str(value)):
-                return str(value)
+            secret_value = st.secrets.get(key, default)
+            if secret_value and not _is_placeholder(str(secret_value)):
+                return str(secret_value)
         except Exception:
             pass
 
-    secrets_toml = root / DEFAULT_SECRET_FILENAMES[0]
-    if secrets_toml.exists():
-        value = _read_toml_secret(secrets_toml, key, default)
-        if value and not _is_placeholder(value):
-            return value
+    secrets_path = project_root_path / DEFAULT_SECRET_PATHS[0]
+    if secrets_path.exists():
+        secret_value = _read_toml_secret(secrets_path, key, default)
+        if secret_value and not _is_placeholder(secret_value):
+            return secret_value
 
-    value = os.environ.get(key, default)
-    if value and not _is_placeholder(value):
-        return value
+    env_value = os.environ.get(key, default)
+    if env_value and not _is_placeholder(env_value):
+        return env_value
 
-    for rel_path in DEFAULT_SECRET_FILENAMES[1:]:
-        dotenv_path = root / rel_path
-        if dotenv_path.exists():
-            value = _read_dotenv_secret(dotenv_path, key, default)
-            if value and not _is_placeholder(value):
-                return value
+    for env_rel_path in DEFAULT_SECRET_PATHS[1:]:
+        env_path = project_root_path / env_rel_path
+        if env_path.exists():
+            env_value = _read_dotenv_secret(env_path, key, default)
+            if env_value and not _is_placeholder(env_value):
+                return env_value
 
     return default
 
@@ -165,10 +165,10 @@ def create_gemini_caller(
     ``google-genai`` lazily and creates ``genai.Client(api_key=...)``.
     """
 
-    resolved_key = api_key if api_key is not None else load_secret(
+    gemini_api_key = api_key if api_key is not None else load_secret(
         "GEMINI_API_KEY", project_root=project_root
     )
-    if client is None and not resolved_key:
+    if client is None and not gemini_api_key:
         raise GeminiConnectorError(
             "GEMINI_API_KEY is not configured. Set it in Streamlit secrets, "
             "environment variables, data/.env, or repository .env."
@@ -184,7 +184,7 @@ def create_gemini_caller(
                 "google-genai is required for live Gemini calls. "
                 "Install the google-genai package."
             ) from exc
-        client = genai.Client(api_key=resolved_key)
+        client = genai.Client(api_key=gemini_api_key)
     else:
         try:
             from google.genai import types as genai_types  # type: ignore[assignment]
@@ -361,11 +361,11 @@ class GeminiFunctionCallingRouter:
                 "google-genai is required for Gemini function-calling routing."
             ) from exc
 
-        api_key = load_secret("GEMINI_API_KEY", project_root=self.project_root)
+        gemini_api_key = load_secret("GEMINI_API_KEY", project_root=self.project_root)
         if self._client is not None:
             client = self._client
-        elif api_key:
-            client = genai.Client(api_key=api_key)
+        elif gemini_api_key:
+            client = genai.Client(api_key=gemini_api_key)
         else:
             raise GeminiConnectorError("GEMINI_API_KEY is not configured.")
 
