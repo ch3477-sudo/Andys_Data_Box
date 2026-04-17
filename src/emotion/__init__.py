@@ -28,3 +28,15 @@ from .risk_analyzer import (
     analyze_risk,
     full_analysis,
 )
+
+
+from .llm_connector import (
+    DEFAULT_GEMINI_MODEL,
+    GeminiConnectorError,
+    GeminiFunctionCallingRouter,
+    ToolDispatchResult,
+    analyze_with_gemini_tools,
+    create_gemini_caller,
+    create_gemini_function_router,
+    load_secret,
+)

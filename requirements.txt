@@ -6,3 +6,4 @@ langchain-openai
 langchain-community
 matplotlib
 rank-bm25
+google-genai
