@@ -83,26 +83,6 @@
         </tr>
       </table>
     </td>
-    </td>
-    <td align="center" width="125" valign="top">
-      <table align="center" width="105">
-        <tr>
-          <td align="center" height="120">
-            <img src="app/figures/미스터감자.jpg"
-                 width="70" height="95"
-                 style="object-fit:contain;">
-          </td>
-        </tr>
-        <tr>
-          <td align="center" height="36"><b>이선호</b></td>
-        </tr>
-        <tr>
-          <td align="center" height="44">
-            <a href="https://github.com/fridayeverynote-cell">@fridayeverynote-cell</a>
-          </td>
-        </tr>
-      </table>
-    </td>
     <td align="center" width="125" valign="top">
       <table align="center" width="105">
         <tr>
@@ -130,7 +110,6 @@
 | 박소윤 | 기획 총괄 / UI 설계 / 프로젝트 관리 |
 | 윤찬호 | 데이터 전처리 및 Retrieval 평가 |
 | 전승권 | 환경설정 / API / 앱 구조 |
-| 이선호 | |
 
 ---
 
@@ -235,10 +214,6 @@ project/
             <td style="border: 1px solid #ddd; padding: 10px;"></td>
         </tr>
         <tr>
-            <td style="text-align: center; border: 1px solid #ddd;">이선호</td>
-            <td style="border: 1px solid #ddd; padding: 10px;"></td>
-        </tr>
-        <tr>
             <td style="text-align: center; border: 1px solid #ddd;">전승권</td>
             <td style="border: 1px solid #ddd; padding: 10px;"></td>
         </tr>
@@ -260,10 +235,6 @@ project/
             <td style="border: 1px solid #ddd; padding: 10px;"></td>
         </tr>
         <tr>
-            <td style="text-align: center; border: 1px solid #ddd;">이선호</td>
-            <td style="border: 1px solid #ddd; padding: 10px;"></td>
-        </tr>
-        <tr>
             <td style="text-align: center; border: 1px solid #ddd;">전승권</td>
             <td style="border: 1px solid #ddd; padding: 10px;"></td>
         </tr>
@@ -282,35 +253,6 @@ project/
         </tr>
         <tr>
             <td style="text-align: center; border: 1px solid #ddd;">박소윤</td>
-            <td style="border: 1px solid #ddd; padding: 10px;"></td>
-        </tr>
-        <tr>
-            <td style="text-align: center; border: 1px solid #ddd;">이선호</td>
-            <td style="border: 1px solid #ddd; padding: 10px;"></td>
-        </tr>
-        <tr>
-            <td style="text-align: center; border: 1px solid #ddd;">전승권</td>
-            <td style="border: 1px solid #ddd; padding: 10px;"></td>
-        </tr>
-<table style="width: 100%; border-collapse: collapse; border: 1px solid #ddd; margin-bottom: 30px;">
-    <thead>
-        <tr style="background-color: #f8f9fa;">
-            <th style="width: 15%; border: 1px solid #ddd; padding: 10px;">작성자</th>
-            <th style="width: 15%; border: 1px solid #ddd; padding: 10px;">대상자</th>
-            <th style="border: 1px solid #ddd; padding: 10px;">회고 내용</th>
-        </tr>
-    </thead>
-        <tr>
-            <td rowspan="4" style="text-align: center; font-weight: bold; border: 1px solid #ddd;">이선호</td>
-            <td style="text-align: center; border: 1px solid #ddd;">김용욱</td>
-            <td style="border: 1px solid #ddd; padding: 10px;"></td>
-        </tr>
-        <tr>
-            <td style="text-align: center; border: 1px solid #ddd;">박소윤</td>
-            <td style="border: 1px solid #ddd; padding: 10px;"></td>
-        </tr>
-        <tr>
-            <td style="text-align: center; border: 1px solid #ddd;">윤찬호</td>
             <td style="border: 1px solid #ddd; padding: 10px;"></td>
         </tr>
         <tr>
@@ -338,9 +280,5 @@ project/
             <td style="text-align: center; border: 1px solid #ddd;">윤찬호</td>
             <td style="border: 1px solid #ddd; padding: 10px;"></td>
         </tr>
-        <tr>
-            <td style="text-align: center; border: 1px solid #ddd;">이선호</td>
-            <td style="border: 1px solid #ddd; padding: 10px;"></td>
-        </tr>
-    </tbody>
+       
 </table>
