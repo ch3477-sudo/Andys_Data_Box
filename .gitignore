@@ -316,4 +316,3 @@ data/
 /data
 data/.env
 *.csv
-git rm --cached -- data/.env
