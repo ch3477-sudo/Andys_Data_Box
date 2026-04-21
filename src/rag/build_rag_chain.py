@@ -11,7 +11,13 @@ from collections import Counter, defaultdict
 from typing import Any
 
 import pandas as pd
-from rank_bm25 import BM25Okapi
+try:
+    from rank_bm25 import BM25Okapi
+except ImportError as exc:
+    raise ImportError(
+        "rank_bm25 패키지가 설치되지 않았습니다. "
+        "`pip install -r requirements.txt` 또는 `pip install rank-bm25`를 실행하세요."
+    ) from exc
 
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_core.prompts import PromptTemplate
@@ -673,10 +679,13 @@ PROMPT = PromptTemplate.from_template(
 [위험도]
 ...
 
-[추천 답변 1]
+[공감형]
 ...
 
-[추천 답변 2]
+[완화형]
+...
+
+[비난 회피형]
 ...
 
 [피해야 할 표현]

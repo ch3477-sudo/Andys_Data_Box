@@ -127,7 +127,7 @@ class RagResponseTypeMappingTest(unittest.TestCase):
             [item["label"] for item in payload["recommended_replies"]],
             list(TARGET_RESPONSE_STYLES),
         )
-        self.assertEqual(payload["assistant_message"], "많이 서운했겠어.")
+        self.assertEqual(payload["assistant_message"], "[공감형] 많이 서운했겠어.")
         self.assertEqual(
             payload["reply_candidates"],
             [

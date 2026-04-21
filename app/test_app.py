@@ -468,6 +468,18 @@ def main():
         else:
             st.info("분석 후 추천 답변이 표시됩니다.")
 
+        if latest and latest.get("recommended_replies"):
+            st.write("")
+            st.markdown("<strong>📚 RAG 참고 예시</strong>", unsafe_allow_html=True)
+            for item in latest["recommended_replies"][:3]:
+                label = clean_display_text(item.get("label", ""))
+                text = clean_display_text(item.get("text", ""))
+                source = clean_display_text(item.get("source_listener_empathy", ""))
+                evidence = f"[{label}] {text}"
+                if source:
+                    evidence += f"\n근거 유형: {source}"
+                render_text_box("검색된 응답 예시", evidence)
+
         st.write("")
         st.markdown("<strong>⚠️ 피해야 할 표현 / 대체 표현</strong>", unsafe_allow_html=True)
         l_col, r_col = st.columns(2)

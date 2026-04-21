@@ -141,13 +141,12 @@ def build_text_analysis_payload(
     recommended_replies = normalize_recommended_replies(
         rag_result.get("recommended_replies")
     )
-    if recommended_replies:
+    reply_candidates = extract_reply_candidates(result_text, response_examples)
+    if not reply_candidates and recommended_replies:
         reply_candidates = [
             f"[{reply['label']}] {reply['text']}"
             for reply in recommended_replies
         ]
-    else:
-        reply_candidates = extract_reply_candidates(result_text, response_examples)
 
     summary_text = parse_section(result_text, "상황 요약") or clean_text(
         rag_result.get("situation_summary"), user_input
@@ -164,10 +163,7 @@ def build_text_analysis_payload(
     avoid_text = parse_section(result_text, "피해야 할 표현")
     alternative_text = parse_section(result_text, "대체 표현")
     retrieved_cases = format_retrieved_cases(rag_result.get("retrieved_docs", []))
-    if recommended_replies:
-        assistant_message = recommended_replies[0]["text"]
-    else:
-        assistant_message = reply_candidates[0] if reply_candidates else result_text
+    assistant_message = reply_candidates[0] if reply_candidates else result_text
 
     return {
         "user_input": user_input,
