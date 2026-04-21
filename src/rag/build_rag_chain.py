@@ -11,7 +11,13 @@ from collections import Counter, defaultdict
 from typing import Any
 
 import pandas as pd
-from rank_bm25 import BM25Okapi
+try:
+    from rank_bm25 import BM25Okapi
+except ImportError as exc:
+    raise ImportError(
+        "rank_bm25 패키지가 설치되지 않았습니다. "
+        "`pip install -r requirements.txt` 또는 `pip install rank-bm25`를 실행하세요."
+    ) from exc
 
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_core.prompts import PromptTemplate
@@ -40,6 +46,7 @@ PROCESSED_DATA_DIR = PROJECT_ROOT / "data" / "processed"
 
 RAG_TEXT_PATH = PROCESSED_DATA_DIR / "rag_documents_with_text.csv"
 RESPONSE_TEXT_PATH = PROCESSED_DATA_DIR / "response_pairs_with_text.csv"
+TARGET_RESPONSE_STYLES = ("공감형", "완화형", "비난 회피형")
 
 
 # ============================================================
@@ -362,14 +369,67 @@ def score_response_example(row: pd.Series, emotion: str, question_keywords: list
     return score
 
 
-def get_response_examples(
+def map_listener_empathy_to_response_styles(listener_empathy: str) -> list[str]:
+    empathy_text = clean_text(listener_empathy)
+    if not empathy_text or empathy_text == "미분류":
+        return []
+
+    styles: list[str] = []
+    if any(keyword in empathy_text for keyword in ["위로", "동조"]):
+        styles.append("공감형")
+    if any(keyword in empathy_text for keyword in ["조언", "격려"]):
+        styles.append("완화형")
+    if any(keyword in empathy_text for keyword in ["조언", "격려", "위로", "동조"]):
+        styles.append("비난 회피형")
+    return styles
+
+
+def score_response_style_match(row: pd.Series, target_style: str) -> int:
+    listener_empathy = clean_text(row.get("listener_empathy", ""))
+    listener_response = clean_text(row.get("listener_response", ""))
+    response_example_text = clean_text(row.get("response_example_text", ""))
+    mapped_styles = map_listener_empathy_to_response_styles(listener_empathy)
+
+    score = 0
+    if target_style in mapped_styles:
+        score += 10
+
+    if target_style == "공감형":
+        if any(keyword in listener_empathy for keyword in ["위로", "동조"]):
+            score += 4
+        if any(keyword in listener_response for keyword in ["서운", "힘들", "속상", "그랬겠다", "이해"]):
+            score += 2
+
+    elif target_style == "완화형":
+        if any(keyword in listener_empathy for keyword in ["조언", "격려"]):
+            score += 4
+        if any(keyword in listener_response for keyword in ["천천히", "차분", "조금", "같이", "해보"]):
+            score += 2
+
+    elif target_style == "비난 회피형":
+        if any(keyword in listener_empathy for keyword in ["조언", "격려", "위로", "동조"]):
+            score += 3
+        soft_text = " ".join([listener_response, response_example_text])
+        if not any(keyword in soft_text for keyword in ["왜", "맨날", "항상", "네가", "니가", "잘못"]):
+            score += 2
+
+    return score
+
+
+def _response_text_from_row(row: pd.Series) -> str:
+    listener_response = clean_text(row.get("listener_response", ""))
+    if listener_response:
+        return listener_response
+    return clean_text(row.get("response_example_text", ""))
+
+
+def build_response_example_candidates(
     response_df: pd.DataFrame,
     retrieved_docs: list[dict],
     emotion: str,
     question: str,
     example_vector_db: Any,
-    top_n: int = 3
-) -> str:
+) -> pd.DataFrame:
     dialogue_ids = [
         clean_text(doc.get("dialogue_id", ""))
         for doc in retrieved_docs
@@ -422,8 +482,123 @@ def get_response_examples(
         axis=1
     )
 
-    candidate_df = candidate_df.sort_values(by="score", ascending=False)
+    return candidate_df.sort_values(by="score", ascending=False)
 
+
+def select_style_labeled_response_examples(
+    candidate_df: pd.DataFrame,
+    target_styles: tuple[str, ...] = TARGET_RESPONSE_STYLES,
+) -> list[dict]:
+    if candidate_df.empty:
+        return []
+
+    selected: list[dict] = []
+    used_keys: set[tuple[str, str]] = set()
+
+    for target_style in target_styles:
+        best_row = _select_best_response_row(candidate_df, target_style, used_keys)
+        if best_row is None:
+            continue
+
+        text = _response_text_from_row(best_row)
+        used_keys.add((clean_text(best_row.get("dialogue_id", "")), text))
+        selected.append(
+            {
+                "label": target_style,
+                "text": text,
+                "source_listener_empathy": clean_text(best_row.get("listener_empathy", "")),
+                "dialogue_id": clean_text(best_row.get("dialogue_id", "")),
+            }
+        )
+
+    return selected
+
+
+def _select_best_response_row(
+    candidate_df: pd.DataFrame,
+    target_style: str,
+    used_keys: set[tuple[str, str]],
+) -> pd.Series | None:
+    best_row = None
+    best_score = None
+
+    for allow_reuse in [False, True]:
+        for _, row in candidate_df.iterrows():
+            text = _response_text_from_row(row)
+            if not text:
+                continue
+
+            candidate_key = (
+                clean_text(row.get("dialogue_id", "")),
+                text,
+            )
+            if not allow_reuse and candidate_key in used_keys:
+                continue
+
+            style_score = score_response_style_match(row, target_style)
+            total_score = int(row.get("score", 0)) + style_score
+            if best_score is None or total_score > best_score:
+                best_score = total_score
+                best_row = row
+
+        if best_row is None:
+            continue
+        return best_row
+
+    return None
+
+
+def format_labeled_response_examples(recommended_replies: list[dict]) -> str:
+    return "\n\n".join(
+        [
+            f"[응답 예시 {index + 1} - {reply['label']}]\n{reply['text']}"
+            for index, reply in enumerate(recommended_replies)
+        ]
+    )
+
+
+def get_labeled_response_examples(
+    response_df: pd.DataFrame,
+    retrieved_docs: list[dict],
+    emotion: str,
+    question: str,
+    example_vector_db: Any,
+) -> list[dict]:
+    candidate_df = build_response_example_candidates(
+        response_df=response_df,
+        retrieved_docs=retrieved_docs,
+        emotion=emotion,
+        question=question,
+        example_vector_db=example_vector_db,
+    )
+    return select_style_labeled_response_examples(candidate_df)
+
+
+def get_response_examples(
+    response_df: pd.DataFrame,
+    retrieved_docs: list[dict],
+    emotion: str,
+    question: str,
+    example_vector_db: Any,
+    top_n: int = 3
+) -> str:
+    recommended_replies = get_labeled_response_examples(
+        response_df=response_df,
+        retrieved_docs=retrieved_docs,
+        emotion=emotion,
+        question=question,
+        example_vector_db=example_vector_db,
+    )
+    if recommended_replies:
+        return format_labeled_response_examples(recommended_replies[:top_n])
+
+    candidate_df = build_response_example_candidates(
+        response_df=response_df,
+        retrieved_docs=retrieved_docs,
+        emotion=emotion,
+        question=question,
+        example_vector_db=example_vector_db,
+    )
     text_col = "response_example_text" if "response_example_text" in candidate_df.columns else "listener_response"
     selected = candidate_df.head(top_n)[text_col].astype(str).tolist()
 
@@ -504,10 +679,13 @@ PROMPT = PromptTemplate.from_template(
 [위험도]
 ...
 
-[추천 답변 1]
+[공감형]
 ...
 
-[추천 답변 2]
+[완화형]
+...
+
+[비난 회피형]
 ...
 
 [피해야 할 표현]
@@ -544,14 +722,14 @@ def generate_recommended_reply(question: str, method: str = "rrf", k: int = 3) -
     risk_level = get_main_risk_level(retrieved_docs)
     context = format_docs(retrieved_docs)
 
-    response_examples = get_response_examples(
+    recommended_replies = get_labeled_response_examples(
         response_df=response_df,
         retrieved_docs=retrieved_docs,
         emotion=main_emotion,
         question=question,
         example_vector_db=example_vector_db,
-        top_n=3,
     )
+    response_examples = format_labeled_response_examples(recommended_replies)
 
     final_prompt = PROMPT.format(
         question=question,
@@ -572,6 +750,7 @@ def generate_recommended_reply(question: str, method: str = "rrf", k: int = 3) -
         "main_emotion": main_emotion,
         "risk_level": risk_level,
         "response_examples": response_examples,
+        "recommended_replies": recommended_replies,
         "result_text": llm_response.content,
     }
 
