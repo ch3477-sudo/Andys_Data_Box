@@ -11,13 +11,6 @@ from collections import Counter, defaultdict
 from typing import Any
 
 import pandas as pd
-try:
-    from rank_bm25 import BM25Okapi
-except ImportError as exc:
-    raise ImportError(
-        "rank_bm25 패키지가 설치되지 않았습니다. "
-        "`pip install -r requirements.txt` 또는 `pip install rank-bm25`를 실행하세요."
-    ) from exc
 
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_core.prompts import PromptTemplate
@@ -103,7 +96,15 @@ def load_dataframes() -> tuple[pd.DataFrame, pd.DataFrame]:
     return rag_df, response_df
 
 
-def build_bm25(rag_df: pd.DataFrame) -> BM25Okapi:
+def build_bm25(rag_df: pd.DataFrame) -> Any:
+    try:
+        from rank_bm25 import BM25Okapi
+    except ImportError as exc:
+        raise ImportError(
+            "rank_bm25 패키지가 설치되지 않았습니다. "
+            "`pip install -r requirements.txt` 또는 `pip install rank-bm25`를 실행하세요."
+        ) from exc
+
     rag_texts = rag_df["rag_text"].tolist()
     tokenized_rag_texts = [rag_text.split() for rag_text in rag_texts]
     return BM25Okapi(tokenized_rag_texts)
@@ -148,7 +149,7 @@ def load_llm(openai_api_key: str) -> ChatOpenAI:
 # ============================================================
 # 5. 검색 함수
 # ============================================================
-def bm25_search(query: str, rag_df: pd.DataFrame, bm25: BM25Okapi, k: int = 3) -> list[dict]:
+def bm25_search(query: str, rag_df: pd.DataFrame, bm25: Any, k: int = 3) -> list[dict]:
     tokenized_query = query.split()
     scores = bm25.get_scores(tokenized_query)
 
@@ -229,8 +230,8 @@ def reciprocal_rank_fusion(result_lists: list[list[dict]], k: int = 60, top_n: i
 
 def retrieve_documents(
     question: str,
-    rag_df: pd.DataFrame,
-    bm25: BM25Okapi,
+    rag_df: pd.DataFrame | None,
+    bm25: Any | None,
     vector_db: Any,
     method: str = "rrf",
     k: int = 3
@@ -239,9 +240,13 @@ def retrieve_documents(
         return dense_search(question, vector_db=vector_db, k=k)
 
     if method == "bm25":
+        if rag_df is None or bm25 is None:
+            raise ValueError("bm25 검색은 로컬 CSV 데이터와 BM25 인덱스가 필요합니다.")
         return bm25_search(question, rag_df=rag_df, bm25=bm25, k=k)
 
     if method == "rrf":
+        if rag_df is None or bm25 is None:
+            return dense_search(question, vector_db=vector_db, k=k)
         bm25_results = bm25_search(question, rag_df=rag_df, bm25=bm25, k=k)
         dense_results = dense_search(question, vector_db=vector_db, k=k)
         return reciprocal_rank_fusion([bm25_results, dense_results], top_n=k)
@@ -424,7 +429,7 @@ def _response_text_from_row(row: pd.Series) -> str:
 
 
 def build_response_example_candidates(
-    response_df: pd.DataFrame,
+    response_df: pd.DataFrame | None,
     retrieved_docs: list[dict],
     emotion: str,
     question: str,
@@ -436,8 +441,14 @@ def build_response_example_candidates(
         if clean_text(doc.get("dialogue_id", ""))
     ]
 
+    if response_df is None:
+        response_df = pd.DataFrame()
+
     # 1차: 현재 검색된 문서와 직접 연결된 응답 예시
-    candidate_df = filter_response_examples_by_dialogue_ids(response_df, dialogue_ids)
+    if response_df.empty:
+        candidate_df = pd.DataFrame()
+    else:
+        candidate_df = filter_response_examples_by_dialogue_ids(response_df, dialogue_ids)
 
     # 2차: example vector DB에서 유사 응답 예시 검색
     vector_candidates = example_dense_search(question, example_vector_db, k=5)
@@ -472,8 +483,11 @@ def build_response_example_candidates(
             candidate_df = candidate_df.drop_duplicates(subset=dedup_cols)
 
     # 그래도 비면 전체 fallback
-    if candidate_df.empty:
+    if candidate_df.empty and not response_df.empty:
         candidate_df = response_df.copy()
+
+    if candidate_df.empty:
+        return candidate_df
 
     question_keywords = extract_keywords_from_question(question)
 
@@ -558,7 +572,7 @@ def format_labeled_response_examples(recommended_replies: list[dict]) -> str:
 
 
 def get_labeled_response_examples(
-    response_df: pd.DataFrame,
+    response_df: pd.DataFrame | None,
     retrieved_docs: list[dict],
     emotion: str,
     question: str,
@@ -575,7 +589,7 @@ def get_labeled_response_examples(
 
 
 def get_response_examples(
-    response_df: pd.DataFrame,
+    response_df: pd.DataFrame | None,
     retrieved_docs: list[dict],
     emotion: str,
     question: str,
@@ -700,10 +714,21 @@ PROMPT = PromptTemplate.from_template(
 # ============================================================
 # 9. 메인 생성 함수
 # ============================================================
-def generate_recommended_reply(question: str, method: str = "rrf", k: int = 3) -> dict:
+def generate_recommended_reply(
+    question: str,
+    method: str = "rrf",
+    k: int = 3,
+    use_local_csv: bool = False,
+) -> dict:
     openai_api_key = load_api_key()
-    rag_df, response_df = load_dataframes()
-    bm25 = build_bm25(rag_df)
+    rag_df = None
+    response_df = None
+    bm25 = None
+
+    if use_local_csv or method == "bm25":
+        rag_df, response_df = load_dataframes()
+        bm25 = build_bm25(rag_df)
+
     vector_db = load_vector_db(openai_api_key)
     example_vector_db = load_example_vector_db(openai_api_key)
     chat_model = load_llm(openai_api_key)
